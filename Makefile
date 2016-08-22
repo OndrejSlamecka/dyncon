@@ -16,5 +16,5 @@ ed_tree: src/rnb_tree.c src/rnbw_tree.c src/ed_tree.c src/main.c
 dyncon: src/rnb_tree.c src/rnbw_tree.c src/ed_tree.c src/dyn_con.c src/main.c
 	$(CXX) -o bin/$@ $(CXXFLAGS) $^ $(LINKS)
 
-dcgraph: src/dyn_con.c src/main.c
-	$(CXX) -o bin/$@ $(CXXFLAGS) $^ $(LINKS)
+dcgraph: src/rnb_tree.c src/rnbw_tree.c src/ed_tree.c src/et_tree.c src/dyn_con.c src/dc_main.cpp
+	$(CXX) -g -o bin/$@ $(CXXFLAGS) $^ $(LINKS) -DDEBUG

@@ -17,10 +17,13 @@
 #include "dyn_con.h"
 #include <ogdf/basic/Queue.h>
 #include <sys/time.h>
+#include <limits>
 
 using ogdf::edge;
 using ogdf::node;
 using ogdf::List;
+
+std::mt19937 dyn_con::random_generator;  // define the static member
 
 edge dyn_con::ins(node u, node v)
 // create an edge connecting u and v and return it
@@ -29,8 +32,8 @@ edge dyn_con::ins(node u, node v)
   n_ins++;
 #endif
   // create the new edge
-  edge e = Gp->new_edge(u,v);
-  (*Gp)[e] = new dc_edge_struct();
+  edge e = Gp->newEdge(u,v);
+  Gp->tree_occ[e] = nullptr;
 
   // test whether u and v are already connected
   if(!connected(u,v,max_level))
@@ -86,30 +89,29 @@ void dyn_con::del(edge e)
 #endif
 
   // if e is not an edge in F
-  if(!tree_edge(e)) delete_non_tree(e);
-  else
+  if(!tree_edge(e)) {
+      delete_non_tree(e);
+  } else
   // e is a tree edge
   {
     // remember e
-    int e_level = level(e);
-    node u = source(e);
-    node v = target(e);
+    int e_level = Gp->level[e];
+    node u = e->source();
+    node v = e->target();
 
     // remove e
     delete_tree(e);
 
     // delete specific information for tree edges stored at e
-    for(int j=0; j<=max_level; j++) delete[] (*Gp)[e]->tree_occ[j];
-    delete[] (*Gp)[e]->tree_occ;
+    for(int j=0; j<=max_level; j++) delete[] Gp->tree_occ[e][j];
+    delete[] Gp->tree_occ[e];
 
     // look for a replacement edge
     replace(u,v,e_level);
   }
 
   // delete information stored at e
-  delete (*Gp)[e];
-  (*Gp)[e] = nullptr;
-  Gp->del_edge(e);
+  Gp->delEdge(e);
 }
 
 bool dyn_con::connected(node u, node v)
@@ -174,8 +176,8 @@ bool dyn_con::connected(node x, node y, int i)
 #endif
 
   // get the active occurrences of x and y at level i
-  et_node x_act_occ = (*Gp)[x]->act_occ[i];
-  et_node y_act_occ = (*Gp)[y]->act_occ[i];
+  et_node x_act_occ = Gp->act_occ[x][i];
+  et_node y_act_occ = Gp->act_occ[y][i];
 
   // return whether they belong to the same tree at level i
   return (x_act_occ->find_root() == y_act_occ->find_root());
@@ -190,26 +192,26 @@ void dyn_con::insert_tree(edge e, int i, bool create_tree_occs)
 #endif
 
   // find the endpoints of e
-  node u = source(e);
-  node v = target(e);
+  node u = e->source();
+  node v = e->target();
 
 #ifdef DEBUG
-  cout << "(" << index(u) << "," << index(v) << ") tree ins at level ";
-  cout << i << "\n";
+  std::cout << "(" << u->index() << "," << v->index() << ") tree ins at level ";
+  std::cout << i << "\n";
 #endif
 
   // enter level of e
-  (*Gp)[e]->level = i;
+  Gp->level[e] = i;
 
   // create tree_occ array for e if requested
   if(create_tree_occs)
   {
-    (*Gp)[e]->tree_occ = new et_node*[max_level+1];
+    Gp->tree_occ[e] = new et_node*[max_level+1];
     for(int lev=0; lev<=max_level; lev++)
     {
-      (*Gp)[e]->tree_occ[lev] = new et_node[4];
+      Gp->tree_occ[e][lev] = new et_node[4];
       for(int j=0; j<4; j++) {
-        (*Gp)[e]->tree_occ[lev][j] = nullptr;
+        Gp->tree_occ[e][lev][j] = nullptr;
       }
     }
   }
@@ -218,7 +220,7 @@ void dyn_con::insert_tree(edge e, int i, bool create_tree_occs)
   for(int j=i; j<=max_level; j++) et_link(u,v,e,j,this);
 
   // append e to the list of tree edges at level i
-  (*Gp)[e]->tree_item = tree_edges[i].pushBack(e);
+  Gp->tree_item[e] = tree_edges[i].pushBack(e);
 }
 
 void dyn_con::delete_tree(edge e)
@@ -232,18 +234,18 @@ void dyn_con::delete_tree(edge e)
   int i = level(e);
 
 #ifdef DEBUG
-  cout << "(" << index(source(e)) << "," << index(target(e)) << ") tree del ";
-  cout << "at level " << i << "\n";
+  std::cout << "(" << e->source()->index() << "," << e->target()->index() << ") tree del ";
+  std::cout << "at level " << i << "\n";
 #endif
 
   // cut the spanning trees
   for(int j=i; j<=max_level; j++) et_cut(e,j,this);
 
   // remove e from the list of tree edges at level i
-  tree_edges[i].del_item((*Gp)[e]->tree_item);
+  tree_edges[i].del(Gp->tree_item[e]);
 
-  // set tree_item of e to nil
-  (*Gp)[e]->tree_item = nil;
+  // set tree_item of e to null
+  Gp->tree_item[e] = nullptr;
 }
 
 void dyn_con::replace(node u, node v, int i)
@@ -255,8 +257,8 @@ void dyn_con::replace(node u, node v, int i)
 #endif
 
   // determine the level i trees containing u and v
-  et_tree t1 = (*Gp)[u]->act_occ[i]->find_root();
-  et_tree t2 = (*Gp)[v]->act_occ[i]->find_root();
+  et_tree t1 = Gp->act_occ[u][i]->find_root();
+  et_tree t2 = Gp->act_occ[v][i]->find_root();
 
   // let t1 be the smaller tree
   if(t1->get_subtree_weight() > t2->get_subtree_weight()) t1 = t2;
@@ -266,14 +268,14 @@ void dyn_con::replace(node u, node v, int i)
   {
     // sample randomly at most edges_to_sample edges
     int not_done = true;
-    edge e;
+    edge e = nullptr;
     for(int j=0; not_done && (j<edges_to_sample); j++)
     {
       e = sample_and_test(t1,i);
       if(e) not_done = false;
     }
 
-    if(e)
+    if(e != nullptr)
     {
       // sampling was successful, insert e as a tree edge at level i
       delete_non_tree(e);
@@ -325,7 +327,8 @@ void dyn_con::replace(node u, node v, int i)
 #ifdef STATISTICS
         rep_big_cut++;
 #endif
-        edge reconnect = cut_edges.pop();
+        edge reconnect = cut_edges.front();
+        cut_edges.popFront();
         delete_non_tree(reconnect);
         insert_tree(reconnect,i,true);
       }
@@ -336,7 +339,8 @@ void dyn_con::replace(node u, node v, int i)
 #ifdef STATISTICS
         rep_sparse_cut++;
 #endif
-        edge reconnect = cut_edges.pop();
+        edge reconnect = cut_edges.front();
+        cut_edges.popFront();
         delete_non_tree(reconnect);
 
         if(i<max_level)
@@ -380,7 +384,8 @@ edge dyn_con::sample_and_test(et_tree T, int i)
   int no_of_adj = T->get_subtree_weight();
 
   // pick a random one
-  int rnd_adj = rs(1,no_of_adj);
+  std::uniform_int_distribution<std::mt19937::result_type> uniform(1, no_of_adj);
+  int rnd_adj = uniform(random_generator);;
 
   // locate the et_node representing this adjacency and get the corr. node
   int offset;
@@ -388,11 +393,11 @@ edge dyn_con::sample_and_test(et_tree T, int i)
   node u = et_repr->get_corr_node();
 
   // locate the edge corresp. to offset adjacent to u at level i
-  ed_node en = ed_locate((*Gp)[u]->adj_edges[i],offset,offset);
+  ed_node en = ed_locate(Gp->adj_edges[u][i],offset,offset);
   edge e = en->get_corr_edge();
 
   // get the second node of e
-  node v = (source(e) == u) ? target(e) : source(e);
+  node v = (e->source() == u) ? e->target() : e->source();
 
   // if v is in a different tree at level i then return e else nil
   if(connected(u,v,i)) return nullptr;
@@ -406,7 +411,7 @@ void dyn_con::traverse_edges(ed_node ed, List<edge>& edge_list)
   if(ed)
   {
     edge e = ed->get_corr_edge();
-    if(!connected(source(e),target(e),level(e)))
+    if(!connected(e->source(),e->target(),Gp->level[e]))
     {
       // only one endpoint of e in current spanning tree -> append edge
       edge_list.pushBack(e);
@@ -424,7 +429,7 @@ void dyn_con::get_cut_edges(et_node u, int level, List<edge>& result)
   if(u && u->get_subtree_weight())
   {
     node v = u->get_corr_node();
-    if(u->is_active()) traverse_edges((*Gp)[v]->adj_edges[level],result);
+    if(u->is_active()) traverse_edges(Gp->adj_edges[v][level],result);
     get_cut_edges(u->left_child(),level,result);
     get_cut_edges(u->right_child(),level,result);
   }
@@ -438,26 +443,26 @@ void dyn_con::insert_non_tree(edge e, int i)
 #endif
 
 #ifdef DEBUG
-  cout << "(" << index(source(e)) << "," << index(target(e));
-  cout << ") non-tree ins at level " << i << "\n";
+  std::cout << "(" << e->source()->index() << "," << e->target()->index();
+  std::cout << ") non-tree ins at level " << i << "\n";
 #endif
 
-  (*Gp)[e]->level = i;
-  node u = source(e);
-  node v = target(e);
+  Gp->level[e] = i;
+  node u = e->source();
+  node v = e->target();
 
   // insert e in the adjacency trees of its endpoints at level i
-  (*Gp)[e]->non_tree_occ[0] =
-                   ed_insert((*Gp)[u]->adj_edges[i],e,ed_dummy);
-  (*Gp)[e]->non_tree_occ[1] =
-                   ed_insert((*Gp)[v]->adj_edges[i],e,ed_dummy);
+  Gp->non_tree_occ[e][0] =
+                   ed_insert(Gp->adj_edges[u][i],e,ed_dummy);
+  Gp->non_tree_occ[e][1] =
+                   ed_insert(Gp->adj_edges[v][i],e,ed_dummy);
 
   // update non_tree_edges[i]
-  (*Gp)[e]->non_tree_item = non_tree_edges[i].pushBack(e);
+  Gp->non_tree_item[e] = non_tree_edges[i].pushBack(e);
 
   // increase the weight of the active occurrences of u and v at level i
-  (*Gp)[u]->act_occ[i]->add_weight(1);
-  (*Gp)[v]->act_occ[i]->add_weight(1);
+  Gp->act_occ[u][i]->add_weight(1);
+  Gp->act_occ[v][i]->add_weight(1);
 }
 
 void dyn_con::delete_non_tree(edge e)
@@ -468,28 +473,28 @@ void dyn_con::delete_non_tree(edge e)
 #endif
 
   // find the endpoints and the level of e
-  node u = source(e);
-  node v = target(e);
-  int i = level(e);
+  node u = e->source();
+  node v = e->target();
+  int i = Gp->level[e];
 
 #ifdef DEBUG
-  cout << "(" << index(source(e)) << "," << index(target(e));
-  cout << ") non-tree del at level " << i << "\n";
+  std::cout << "(" << e->source()->index() << "," << e->target()->index();
+  std::cout << ") non-tree del at level " << i << "\n";
 #endif
 
   // remove e from the ed_trees of u and v at level i
-  ed_delete((*Gp)[u]->adj_edges[i],(*Gp)[e]->non_tree_occ[0],ed_dummy);
-  (*Gp)[e]->non_tree_occ[0] = nullptr;
-  ed_delete((*Gp)[v]->adj_edges[i],(*Gp)[e]->non_tree_occ[1],ed_dummy);
-  (*Gp)[e]->non_tree_occ[1] = nullptr;
+  ed_delete(Gp->adj_edges[u][i],Gp->non_tree_occ[e][0],ed_dummy);
+  Gp->non_tree_occ[e][0] = nullptr;
+  ed_delete(Gp->adj_edges[v][i],Gp->non_tree_occ[e][1],ed_dummy);
+  Gp->non_tree_occ[e][1] = nullptr;
 
   // remove e from the list of non-tree edges at level i
-  non_tree_edges[i].del_item((*Gp)[e]->non_tree_item);
-  (*Gp)[e]->non_tree_item = nullptr;
+  non_tree_edges[i].del(Gp->non_tree_item[e]);
+  Gp->non_tree_item[e] = nullptr;
 
   // decrease the weights of the active occurrences of u and v if they exist
-  (*Gp)[u]->act_occ[i]->add_weight(-1);
-  (*Gp)[v]->act_occ[i]->add_weight(-1);
+  Gp->act_occ[u][i]->add_weight(-1);
+  Gp->act_occ[v][i]->add_weight(-1);
 }
 
 void dyn_con::rebuild(int i)
@@ -505,7 +510,7 @@ void dyn_con::rebuild(int i)
   if(sum_added_edges > rebuild_bound[i])
   {
 #ifdef DEBUG
-    cout << "rebuild(" << i << ")\n";
+      std::cout << "rebuild(" << i << ")\n";
 #endif
     // move edges down
     move_edges(i);
@@ -543,20 +548,20 @@ void dyn_con::move_edges(int i)
       edge e = tree_edges[j].front();
 
       // update tree_edges[j], tree_edges[i-1], tree_item and level
-      tree_edges[j].del_item(Gp->inf(e)->tree_item);
-      Gp->inf(e)->tree_item = tree_edges[i-1].pushBack(e);
-      Gp->inf(e)->level = i-1;
+      tree_edges[j].del(Gp->tree_item[e]);
+      Gp->tree_item[e] = tree_edges[i-1].pushBack(e);
+      Gp->level[e] = i-1;
 
       // link the corresponding et_trees from level i-1 to j-1
       for(int k=i-1; k<j; k++)
       {
-        et_link(source(e),target(e),e,k,this);
+        et_link(e->source(),e->target(),e,k,this);
       }
     }
   }
 }
 
-dyn_con::dyn_con(dc_graph& G, int ml_reb_bound, int n_levels,
+dyn_con::dyn_con(DCGraph& G, int ml_reb_bound, int n_levels,
                  int edges_to_samp, int small_w, int small_s)
 // constructor, initializes the dynamic connectivity data structure
 // if ml_reb_bound >= 1 it specifies rebuild_bound[max_level] (default is 5000)
@@ -569,7 +574,7 @@ dyn_con::dyn_con(dc_graph& G, int ml_reb_bound, int n_levels,
   Gp = &G;
   int log_n = 0;
   int i;
-  for(i = G.number_of_nodes(); i; i /= 2) log_n++;
+  for(i = G.numberOfNodes(); i; i /= 2) log_n++;
 
   if(small_w>=0) small_weight = small_w;
   else           small_weight = log_n * log_n;
@@ -588,15 +593,15 @@ dyn_con::dyn_con(dc_graph& G, int ml_reb_bound, int n_levels,
   }
 
 #ifdef DEBUG
-  cout << "|V(G)|          = " << G.number_of_nodes() << "\n";
-  cout << "max_level       = " << max_level << "\n";
-  cout << "edges_to_sample = " << edges_to_sample << "\n";
-  cout << "small_set       = " << small_set << "\n\n";
+  std::cout << "|V(G)|          = " << G.numberOfNodes() << "\n";
+  std::cout << "max_level       = " << max_level << "\n";
+  std::cout << "edges_to_sample = " << edges_to_sample << "\n";
+  std::cout << "small_set       = " << small_set << "\n\n";
 #endif
 
   // --- initialize dummy nodes ---
-  et_dummy = new et_node_struct(this,nil);
-  ed_dummy = new ed_node_struct(nil);
+  et_dummy = new et_node_struct(this,nullptr);
+  ed_dummy = new ed_node_struct(nullptr);
 
   // --- initialize the edge lists ---
   non_tree_edges = new List<edge> [max_level+1];
@@ -609,25 +614,25 @@ dyn_con::dyn_con(dc_graph& G, int ml_reb_bound, int n_levels,
   // --- initialize rebuild_bound ---
   rebuild_bound = new int[max_level+1];
   int bound;
-  if(ml_reb_bound>=1) bound = ml_reb_bound;
-  else                bound = 5000;
-  for(int k=max_level; k>=0; k--)
+  if (ml_reb_bound>=1) bound = ml_reb_bound;
+  else                 bound = 5000;
+  for (int k=max_level; k>=0; k--)
   {
     rebuild_bound[k] = bound;
-    if(bound < MAXINT/2) bound *= 2;  // double the bound if possible
+    if (bound < std::numeric_limits<int>::max()/2) {
+        bound *= 2;  // double the bound if possible
+    }
   }
 
   // --- initialize the nodes ---
-  node u;
-  forall_nodes(u,G)
+  for (node u : G.nodes)
   {
-    G[u] = new dc_node_struct();
-    G[u]->act_occ = new et_node[max_level+1];
-    G[u]->adj_edges = new ed_tree[max_level+1];
+    G.act_occ[u] = new et_node[max_level+1];
+    G.adj_edges[u] = new ed_tree[max_level+1];
     for(i=0; i<=max_level; i++)
     {
-      G[u]->act_occ[i] = new et_node_struct(this,u,i,true);
-      G[u]->adj_edges[i] = nil;
+      G.act_occ[u][i] = new et_node_struct(this,u,i,true);
+      G.adj_edges[u][i] = nullptr;
     }
   }
 
@@ -639,12 +644,14 @@ dyn_con::dyn_con(dc_graph& G, int ml_reb_bound, int n_levels,
 #endif
 
   // --- initialize the edges ---
-  edge e;
-  forall_edges(e,G)
+  for (edge e : G.edges)
   {
-    G[e] = new dc_edge_struct();
-    if(!connected(source(e),target(e),0)) insert_tree(e,0,true);
-    else                                  insert_non_tree(e,0);
+    Gp->tree_occ[e] = nullptr;
+    if(!connected(e->source(),e->target(),0)) {
+        insert_tree(e,0,true);
+    } else {
+        insert_non_tree(e,0);
+    }
   }
 
 #ifdef STATISTICS
@@ -674,19 +681,17 @@ dyn_con::dyn_con(dc_graph& G, int ml_reb_bound, int n_levels,
 dyn_con::~dyn_con()
 {
   // first delete all edges in the data structure (not in G)
-  edge e;
-  forall_edges(e,*Gp)
+  for (edge e : Gp->edges)
   {
     if(tree_edge(e))
     {
       delete_tree(e);
-      for(int j=0; j<=max_level; j++) delete[] (*Gp)[e]->tree_occ[j];
-      delete[] (*Gp)[e]->tree_occ;
+      for(int j=0; j<=max_level; j++) {
+          delete[] Gp->tree_occ[e][j];
+      }
+      delete[] Gp->tree_occ[e];
     }
     else delete_non_tree(e);
-
-    delete (*Gp)[e];
-    (*Gp)[e] = nil;
   }
 
   // delete fields (edge lists are empty, no need to clear() them)
@@ -696,17 +701,15 @@ dyn_con::~dyn_con()
   delete[] rebuild_bound;
 
   // delete the et_nodes and the information at the nodes of G
-  node v;
-  forall_nodes(v,*Gp)
+  for (node v : Gp->nodes)
   {
     // per node of G only its active occurrence at each level is left
-    for(int i=0; i<=max_level; i++) delete (*Gp)[v]->act_occ[i];
+    for(int i=0; i<=max_level; i++) {
+        delete Gp->act_occ[v][i];
+    }
 
-    delete[] (*Gp)[v]->act_occ;
-    delete[] (*Gp)[v]->adj_edges;
-
-    delete (*Gp)[v];
-    (*Gp)[v] = nil;
+    delete[] Gp->act_occ[v];
+    delete[] Gp->adj_edges[v];
   }
 
   // delete dummy nodes

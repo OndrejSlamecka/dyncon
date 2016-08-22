@@ -4,29 +4,23 @@
 #include <iostream>
 #include <ogdf/basic/List.h>
 #include <ogdf/basic/Graph.h>
+#include <random>
+#include <array>
 #include "ed_tree.h"
 
 class dyn_con;
 class DCGraph;
-class DCNodeElement;
-class DCEdgeElement;
-
-typedef DCNodeElement *dcnode;
-typedef DCEdgeElement *dcedge;
-
-
 
 class   et_node_struct;
 typedef et_node_struct* et_node;
 typedef et_node et_tree;
-
 
 class et_node_struct : public rnbw_node_struct {
 
 public:
 
   // Constructors
-  et_node_struct(DCGraph* dcp, ogdf::node v, int my_level = -1, int activate = false);
+  et_node_struct(dyn_con* dcp, ogdf::node v, int my_level = -1, int activate = false);
   // Create a new et_node_struct at level my_level for v.
   // Activate it if activate is true.
 
@@ -47,7 +41,7 @@ public:
   friend inline et_node et_locate(et_tree et, int w, int& offset)
   { return (et_node) rnbw_locate(et,w,offset); }
 
-  dcnode get_corr_node() { return corr_node; }
+  ogdf::node get_corr_node() { return corr_node; }
   // This et_node is an occurrence of the returned graph node.
 
   int is_active() { return active; }
@@ -71,10 +65,10 @@ protected:
 
   dyn_con*  dc;          // the dynamic connectivity data structure this node
                          // belongs to
-  dcnode    corr_node;   // corresponding node in G
-  int       level;       // the level of this node
-  int       active;      // true iff active occurrence
-  dcedge    edge_occ[2]; // the at most two tree edges represented
+  ogdf::node      corr_node;   // corresponding node in G
+  int             level;       // the level of this node
+  int             active;      // true iff active occurrence
+  ogdf::edge      edge_occ[2]; // the at most two tree edges represented
                          // also by this node. ordered left and right
 
   void pass_activity(et_node to);
@@ -89,43 +83,41 @@ protected:
 };
 
 
-
-class DCNodeElement : public ogdf::NodeElement {
-    friend DCGraph;
-    DCNodeElement(int id) : NodeElement(id), act_occ(nullptr), adj_edges(nullptr) {}
-
-public:
-  et_node *act_occ;    // array of active occurrences
-  ed_tree *adj_edges;  // array of ed_trees storing adjacent non-tree edges
-
-};
-
-class DCEdgeElement : public ogdf::EdgeElement {
-public:
-  int        level;            // this edge belongs to G_level
-  ogdf::List<ogdf::edge>::iterator non_tree_item;    // non-tree edge: list_item in
-                               // non_tree_edges[level]
-                               // tree edge: nil
-  ogdf::List<ogdf::edge>::iterator  tree_item;        // tree edge: list_item in tree_edges[level]
-                               // non-tree edge: nil
-  ed_node    non_tree_occ[2];  // non-tree edge: pointer to the two
-                               // corresponding ed_nodes
-                               // tree edge: both are nil
-  et_node  **tree_occ;         // tree edge: array for each level the
-                               // 4 pointers to occurrences repr. this edge
-                               // non-tree edge: nil
-
-  DCEdgeElement(ogdf::node src, ogdf::node tgt, int id) :
-      EdgeElement(src, tgt, id),
-      non_tree_item(nullptr), tree_item(nullptr),
-    non_tree_occ{nullptr, nullptr}, tree_occ(nullptr) {}
-};
-
 class DCGraph : public ogdf::Graph {
-    dcnode newNode(int index);
+public:
+    // node props, comments are for separate nodes
+    ogdf::NodeArray<et_node*> act_occ; // array of active occurences
+    ogdf::NodeArray<ed_tree*> adj_edges; // array of ed_trees storing adjacent
+                                         // non-tree edges
+
+    // edge props, comments are for separate edges
+    ogdf::EdgeArray<int> level; // edge belongs to G_level
+    ogdf::EdgeArray<ogdf::List<ogdf::edge>::iterator> non_tree_item; // see below
+        // non-tree edge: list_item in non_tree_edges[level]
+        // tree-edge: null
+
+    ogdf::EdgeArray<ogdf::List<ogdf::edge>::iterator> tree_item; // see below
+        // tree edge: list_item in tree_edges[level]
+        // non-tree edge: null
+
+    ogdf::EdgeArray<std::array<ed_node, 2>> non_tree_occ; // see below
+        // non-tree edge: pointer to the two corresponding ed_nodes
+        // tree edge: both are null
+
+    ogdf::EdgeArray<et_node**> tree_occ; // see below
+        // tree edge: array for each level the 4 pointers to
+        //   occurences repr. this edge
+        // non-tree edge: null
+
+    DCGraph() : Graph(),
+        act_occ(*this),
+        adj_edges(*this),
+        level(*this),
+        non_tree_item(*this),
+        tree_item(*this),
+        non_tree_occ(*this),
+        tree_occ(*this) {}
 };
-
-
 
 class dyn_con{
 
@@ -181,7 +173,6 @@ private:
 
   static std::mt19937 random_generator;  // for choosing random adjacent edges
                                          // in replace
-  static std::uniform_int_distribution<std::mt19937::result_type> uniform;
 
   // some statistics - these counters are only maintained with
   // the -DSTATISTICS compile option
@@ -216,14 +207,14 @@ private:
   // Return true if x and y are connected on level i. Otherwise
   // return false.
 
-  bool tree_edge(dcedge e) {
+  bool tree_edge(ogdf::edge e) {
   // Return true if e is an edge in F, false otherwise.
-      return (e->tree_occ != nullptr);
+      return (Gp->tree_occ[e] != nullptr);
   }
 
-  int level(dcedge e)
+  int level(ogdf::edge e)
   // Return i such that e is in G_i.
-  { return e->level; }
+  { return Gp->level[e]; }
 
   void insert_tree(ogdf::edge e, int i, bool create_tree_occs = false);
   // Insert e into F_i. If create_tree_occs is true, then the storage for the
